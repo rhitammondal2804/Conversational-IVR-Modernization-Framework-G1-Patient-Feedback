@@ -1,0 +1,105 @@
+# .github/workflows/ci-cd.yml
+# ─────────────────────────────────────────────────────────────────────────────
+# CI/CD Pipeline — Patient Feedback IVR
+# Milestone 4: Testing & Deployment
+#
+# Triggers on every push and pull request to main.
+# Stages: Test → Docker Build → Summary
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: CI/CD — Patient Feedback IVR
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+
+  # ── Stage 1: Run ALL tests (M3 + M4) ─────────────────────────────────────
+  test:
+    name: Run Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+
+      - name: Run full test suite with coverage
+        run: |
+          python -m pytest tests/ -v \
+            --cov=src \
+            --cov-report=term-missing \
+            --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+      - name: Write test summary
+        if: always()
+        run: |
+          echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          python -m pytest tests/ --tb=no -q 2>&1 | tail -3 >> $GITHUB_STEP_SUMMARY
+
+  # ── Stage 2: Docker Build (only if tests pass) ────────────────────────────
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        run: |
+          docker build -t patient-feedback-ivr:${{ github.sha }} .
+          echo "✅ Docker image built: patient-feedback-ivr:${{ github.sha }}"
+
+      - name: Smoke test — container starts and health check passes
+        run: |
+          docker run -d --name ivr-smoke -p 5000:5000 \
+            patient-feedback-ivr:${{ github.sha }}
+          sleep 8
+          curl -f http://localhost:5000/api/health && echo "✅ Health check passed"
+          docker stop ivr-smoke && docker rm ivr-smoke
+
+  # ── Stage 3: Summary ──────────────────────────────────────────────────────
+  summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    needs: [test, build]
+    if: always()
+
+    steps:
+      - name: Write pipeline summary
+        run: |
+          echo "## 🏥 Patient Feedback IVR — Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Stage        | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests        | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Build | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY

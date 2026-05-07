@@ -1,5 +1,7 @@
 # backend/main.py
 
+import datetime
+from flask import jsonify  # add jsonify here if not already present
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -48,3 +50,11 @@ def handle_input(request: InputRequest):
 @app.get("/")
 def health():
     return {"status": "IVR Running"}
+
+@app.route('/api/health', methods=['GET'])
+def health():
+    return jsonify({
+        "status": "ok",
+        "service": "Patient Feedback IVR",
+        "timestamp": datetime.datetime.utcnow().isoformat()
+    }), 200
